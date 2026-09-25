@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teapot Art — простой генератор картинок</title>
+<meta name="description" content="Бесплатный генератор изображений на базе открытого API Pollinations.ai">
+<style>
+  :root{ --bg:#12140f; --card:#1c1f16; --line:#2e3325; --txt:#f2f4e6; --dim:#9aa38a; --acc:#e8f372; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+  .wrap{max-width:880px;margin:0 auto;padding:28px 16px 60px}
+  header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .logo{font-size:34px}
+  h1{font-size:26px;letter-spacing:.3px}
+  .sub{color:var(--dim);margin-bottom:22px}
+  .sub a{color:var(--acc);text-decoration:none}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  textarea{width:100%;min-height:84px;background:#0e100b;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:12px;font:inherit;resize:vertical}
+  textarea:focus{outline:1px solid var(--acc)}
+  .row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+  .field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px}
+  label{font-size:13px;color:var(--dim)}
+  select,input[type=number]{background:#0e100b;border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:9px 10px;font:inherit;width:100%}
+  .btn{background:var(--acc);color:#151708;border:none;border-radius:10px;padding:13px 26px;font:600 17px/1 inherit;cursor:pointer;align-self:end}
+  .btn:disabled{opacity:.55;cursor:wait}
+  .btn2{background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer;font:inherit;font-size:14px}
+  .status{margin-top:12px;color:var(--dim);font-size:14px;min-height:20px}
+  .err{color:#f2a2a2}
+  .result{margin-top:16px;text-align:center;display:none}
+  .result img{max-width:100%;border-radius:12px;border:1px solid var(--line)}
+  .spin{display:inline-block;width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:s 0.9s linear infinite;vertical-align:-4px;margin-right:8px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  h2{font-size:18px;margin:30px 0 12px;color:var(--txt)}
+  .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  .gal a{display:block;border-radius:10px;overflow:hidden;border:1px solid var(--line);background:#0e100b}
+  .gal img{width:100%;height:150px;object-fit:cover;display:block}
+  .empty{color:var(--dim);font-size:14px}
+  footer{margin-top:46px;text-align:center;color:var(--dim);font-size:14px}
+  footer a{color:var(--acc)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><span class="logo">🫖</span><h1>Teapot Art</h1></header>
+  <p class="sub">Простой генератор картинок: опиши словами — получишь изображение. Работает на бесплатном открытом API <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations.ai</a></p>
+
+  <div class="panel">
+    <textarea id="prompt" placeholder="Опиши, что нарисовать: «рыжий кот-космонавт в акварельном стиле»…"></textarea>
+    <div class="row">
+      <div class="field"><label>Модель</label><select id="model"><option value="flux">flux</option></select></div>
+      <div class="field"><label>Размер</label>
+        <select id="size">
+          <option value="1024x1024">Квадрат 1024×1024</option>
+          <option value="1280x768">Широкий 1280×768</option>
+          <option value="768x1280">Вертикальный 768×1280</option>
+        </select>
+      </div>
+      <div class="field" style="max-width:140px"><label>Seed</label><input type="number" id="seed" placeholder="случайный"></div>
+      <button class="btn" id="go">Нарисовать</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="result" id="result">
+      <img id="img" alt="Сгенерированное изображение">
+      <div class="row" style="justify-content:center">
+        <button class="btn2" id="again">↻ Ещё вариант</button>
+        <a class="btn2" id="open" target="_blank" rel="noopener">Открыть в новой вкладке ↗</a>
+      </div>
+    </div>
+  </div>
+
+  <h2>История <button class="btn2" id="clear" style="float:right">Очистить</button></h2>
+  <div class="gal" id="gal"></div>
+  <p class="empty" id="empty">Пока пусто — сгенерируй первую картинку.</p>
+
+  <footer>Работает на <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations</a> — бесплатном открытом API генерации изображений. Без регистрации и ключей.</footer>
+</div>
+<script>
+const API = "https://image.pollinations.ai";
+const $ = id => document.getElementById(id);
+const KEY = "teapot-art-history";
+
+async function loadModels(){
+  try{
+    const r = await fetch(API+"/models");
+    const list = await r.json();
+    const sel = $("model");
+    sel.innerHTML = "";
+    (Array.isArray(list) ? list : []).forEach(m=>{
+      const name = typeof m === "string" ? m : (m.name || m.id);
+      if(!name) return;
+      const o = document.createElement("option");
+      o.value = name; o.textContent = name;
+      sel.appendChild(o);
+    });
+  }catch(e){ /* fallback: оставляем flux */ }
+  if(!$("model").children.length){ const o=document.createElement("option"); o.value="flux"; o.textContent="flux"; $("model").appendChild(o); }
+}
+
+function history(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; } }
+function saveHistory(list){ localStorage.setItem(KEY, JSON.stringify(list.slice(0,24))); }
+function renderHistory(){
+  const list = history();
+  $("gal").innerHTML = "";
+  $("empty").style.display = list.length ? "none" : "block";
+  list.forEach(item=>{
+    const a = document.createElement("a");
+    a.href = item.url; a.target = "_blank"; a.rel = "noopener"; a.title = item.prompt;
+    const img = document.createElement("img");
+    img.loading = "lazy"; img.src = item.url; img.alt = item.prompt;
+    a.appendChild(img); $("gal").appendChild(a);
+  });
+}
+
+let currentUrl = "";
+function generate(){
+  const prompt = $("prompt").value.trim();
+  if(!prompt){ setStatus("Опиши, что нарисовать 🙂", true); return; }
+  const model = $("model").value;
+  const [w,h] = $("size").value.split("x");
+  const seed = $("seed").value.trim() || Math.floor(Math.random()*1e9);
+  const url = `${API}/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}`;
+  currentUrl = url;
+  $("go").disabled = true;
+  $("result").style.display = "none";
+  setStatus('<span class="spin"></span>Рисую… (это может занять до минуты)');
+  const img = new Image();
+  img.onload = ()=>{
+    $("img").src = url;
+    $("result").style.display = "block";
+    $("open").href = url;
+    setStatus("");
+    $("go").disabled = false;
+    const list = history();
+    list.unshift({url, prompt, ts: Date.now()});
+    saveHistory(list); renderHistory();
+  };
+  img.onerror = ()=>{
+    setStatus("Не получилось. Попробуй ещё раз или упрости описание.", true);
+    $("go").disabled = false;
+  };
+  img.src = url;
+}
+function setStatus(text, isErr){
+  $("status").innerHTML = text;
+  $("status").className = "status" + (isErr ? " err" : "");
+}
+
+$("go").addEventListener("click", generate);
+$("again").addEventListener("click", ()=>{
+  $("seed").value = Math.floor(Math.random()*1e9);
+  generate();
+});
+$("clear").addEventListener("click", ()=>{ saveHistory([]); renderHistory(); });
+loadModels(); renderHistory();
+</script>
+</body>
+</html>
