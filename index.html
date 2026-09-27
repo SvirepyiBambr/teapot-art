@@ -15,8 +15,7 @@
   h1{font-size:26px;letter-spacing:.3px}
   .sub{color:var(--dim);margin-bottom:22px}
   .sub a{color:var(--acc);text-decoration:none}
-summary{cursor:pointer;color:var(--dim);font-size:13px}
-  .lang{margin-left:auto;display:flex;gap:6px}
+.lang{margin-left:auto;display:flex;gap:6px}
 .lang button{background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:4px 10px;cursor:pointer;font:inherit;font-size:13px}
 .lang button.on{color:var(--acc);border-color:var(--acc)}
   .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
@@ -66,9 +65,6 @@ summary{cursor:pointer;color:var(--dim);font-size:13px}
       <button class="btn" id="go" data-i18n="go">Draw</button>
     </div>
     <div class="status" id="status"></div>
-    <details style="margin-top:10px"><summary data-i18n="byop">More models — use your own Pollinations key</summary>
-      <input type="password" id="apikey" data-i18n-ph="keyPh" placeholder="sk_ key (enter.pollinations.ai/keys)" style="width:100%;margin-top:8px;background:#0e100b;border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:9px 10px;font:inherit">
-    </details>
     <div class="result" id="result">
       <img id="img" alt="Generated image">
       <div class="row" style="justify-content:center">
@@ -99,9 +95,6 @@ const I18N = {
     history: "History", clear: "Clear", empty: "Nothing here yet — generate your first image.",
     needPrompt: "Describe what to draw 🙂", drawing: '<span class="spin"></span>Drawing… (this can take up to a minute)',
     failed: "Didn't work. Try again or simplify the description.",
-    byop: "More models — use your own Pollinations key",
-    keyPh: "sk_ key (enter.pollinations.ai/keys)",
-    keyLoaded: "Your key is set — advanced models added to the Model list.",
   },
   ru: {
     sub: 'Простой генератор картинок: опиши словами — получишь изображение. Работает на бесплатном открытом API <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations.ai</a>',
@@ -112,9 +105,6 @@ const I18N = {
     history: "История", clear: "Очистить", empty: "Пока пусто — сгенерируй первую картинку.",
     needPrompt: "Опиши, что нарисовать 🙂", drawing: '<span class="spin"></span>Рисую… (это может занять до минуты)',
     failed: "Не получилось. Попробуй ещё раз или упрости описание.",
-    byop: "Больше моделей — укажите свой ключ Pollinations",
-    keyPh: "sk_ ключ (enter.pollinations.ai/keys)",
-    keyLoaded: "Ключ сохранён — расширенные модели добавлены в список «Модель».",
   },
 };
 let LANG = localStorage.getItem("teapot-lang") || "en";
@@ -133,16 +123,6 @@ $("lang-ru").addEventListener("click", ()=>{ LANG="ru"; localStorage.setItem("te
 
 const KEY = "teapot-art-history";
 
-const GEN = "https://gen.pollinations.ai";
-const apiKeyField = () => document.getElementById("apikey");
-function getApiKey(){ try{ return apiKeyField().value.trim() || localStorage.getItem("teapot-api-key") || ""; }catch(e){ return ""; } }
-apiKeyField().value = localStorage.getItem("teapot-api-key") || "";
-apiKeyField().addEventListener("change", ()=>{
-  localStorage.setItem("teapot-api-key", apiKeyField().value.trim());
-  setStatus(I18N[LANG].keyLoaded || "");
-  loadModels();
-});
-
 async function loadModels(){
   try{
     const r = await fetch(API+"/models");
@@ -158,22 +138,6 @@ async function loadModels(){
     });
   }catch(e){ /* fallback: оставляем flux */ }
   if(!$("model").children.length){ const o=document.createElement("option"); o.value="flux"; o.textContent="flux"; $("model").appendChild(o); }
-  // Advanced (BYOP) models from gen.pollinations.ai — only when a key is set
-  if(getApiKey()){
-    try{
-      const r2 = await fetch(GEN+"/image/models");
-      const list2 = await r2.json();
-      const sel = $("model");
-      (Array.isArray(list2) ? list2 : []).forEach(m=>{
-        const name = typeof m === "string" ? m : (m.name || m.id);
-        if(!name) return;
-        if([...sel.children].some(o=>o.value===name)) return;
-        const o = document.createElement("option");
-        o.value = name; o.textContent = name + " ★";
-        sel.appendChild(o);
-      });
-    }catch(e){ /* no key access — keep free list */ }
-  }
 }
 
 function history(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; } }
@@ -192,60 +156,33 @@ function renderHistory(){
 }
 
 let currentUrl = "";
-async function generate(){
+function generate(){
   const prompt = $("prompt").value.trim();
   if(!prompt){ setStatus(I18N[LANG].needPrompt, true); return; }
   const model = $("model").value;
   const [w,h] = $("size").value.split("x");
   const seed = $("seed").value.trim() || Math.floor(Math.random()*1e9);
-  const isGenModel = model !== "sana" && getApiKey();
-  const url = isGenModel ? "" :
-    `${API}/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}`;
+  const url = `${API}/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}`;
   currentUrl = url;
   $("go").disabled = true;
   $("result").style.display = "none";
   setStatus(I18N[LANG].drawing);
-  if(isGenModel){
-    try{
-      const resp = await fetch(`${GEN}/v1/images/generations`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json", "Authorization": "Bearer " + getApiKey()},
-        body: JSON.stringify({model, prompt, size: `${w}x${h}`, seed: Number(seed)})
-      });
-      if(!resp.ok) throw new Error("HTTP " + resp.status);
-      const data = await resp.json();
-      const item = (data.data||[])[0] || {};
-      let src = item.url || (item.b64_json ? "data:image/png;base64," + item.b64_json : "");
-      if(!src) throw new Error("no image");
-      showResult(src, prompt);
-    }catch(e){
-      setStatus((I18N[LANG].failed) + " (" + (e.message||"") + ")", true);
-      $("go").disabled = false;
-    }
-    return;
-  }
   const img = new Image();
   img.onload = ()=>{
     $("img").src = url;
-    showResult(url, prompt);
+    $("result").style.display = "block";
+    $("open").href = url;
+    setStatus("");
+    $("go").disabled = false;
+    const list = history();
+    list.unshift({url, prompt, ts: Date.now()});
+    saveHistory(list); renderHistory();
   };
   img.onerror = ()=>{
     setStatus(I18N[LANG].failed, true);
     $("go").disabled = false;
   };
   img.src = url;
-}
-function showResult(src, prompt){
-  $("img").src = src;
-  $("result").style.display = "block";
-  $("open").href = src;
-  setStatus("");
-  $("go").disabled = false;
-  if(!src.startsWith("data:")){
-    const list = history();
-    list.unshift({url: src, prompt, ts: Date.now()});
-    saveHistory(list); renderHistory();
-  }
 }
 function setStatus(text, isErr){
   $("status").innerHTML = text;
