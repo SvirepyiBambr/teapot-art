@@ -84,6 +84,7 @@
 
 <script>
 const API = "https://gen.pollinations.ai/image";
+const FREE = "https://image.pollinations.ai/prompt";
 const $ = id => document.getElementById(id);
 // ---- i18n ----
 const I18N = {
@@ -92,7 +93,7 @@ const I18N = {
     model: "Model", size: "Size", seed: "Seed",
     sq: "Square 1024×1024", wide: "Wide 1280×768", tall: "Portrait 768×1280",
     randomPh: "random", promptPh: 'Describe what to draw: “a ginger cat astronaut in watercolor style”…',
-    key: "Key (optional)", keyPh: "your Pollinations key", keyHint: "Some models need a free key — get one at enter.pollinations.ai.",
+    key: "Key (optional)", keyPh: "your Pollinations key", keyHint: "Tip: without a key you get the free tier; add a free key from enter.pollinations.ai for more models and higher limits.",
     go: "Draw", again: "↻ Another take", open: "Open in new tab ↗",
     history: "History", clear: "Clear", empty: "Nothing here yet — generate your first image.",
     needPrompt: "Describe what to draw 🙂", drawing: '<span class="spin"></span>Drawing… (this can take up to a minute)',
@@ -103,7 +104,7 @@ const I18N = {
     model: "Модель", size: "Размер", seed: "Зерно (Seed)",
     sq: "Квадрат 1024×1024", wide: "Широкий 1280×768", tall: "Вертикальный 768×1280",
     randomPh: "случайный", promptPh: 'Опиши, что нарисовать: «рыжий кот-космонавт в акварельном стиле»…',
-    key: "Ключ (необязательно)", keyPh: "вставь свой ключ Pollinations", keyHint: "Часть моделей требует бесплатный ключ с enter.pollinations.ai.",
+    key: "Ключ (необязательно)", keyPh: "вставь свой ключ Pollinations", keyHint: "Совет: без ключа доступен бесплатный тариф; добавь бесплатный ключ с enter.pollinations.ai — больше моделей и выше лимиты.",
     go: "Нарисовать", again: "↻ Ещё вариант", open: "Открыть в новой вкладке ↗",
     history: "История", clear: "Очистить", empty: "Пока пусто — сгенерируй первую картинку.",
     needPrompt: "Опиши, что нарисовать 🙂", drawing: '<span class="spin"></span>Рисую… (это может занять до минуты)',
@@ -129,22 +130,28 @@ const KEYSTORE = "teapot-art-key";
 function userKey(){ return (("key" in $ ? $("key").value : "") || localStorage.getItem(KEYSTORE) || "").trim(); }
 
 async function loadModels(){
+  const k = userKey();
+  const sel = $("model");
+  sel.innerHTML = "";
+  if(!k){
+    // Anonymous requests are served by the free legacy endpoint (model choice is fixed).
+    const o = document.createElement("option");
+    o.value = "flux"; o.textContent = "flux (free tier)";
+    sel.appendChild(o);
+    return;
+  }
   try{
-    const k = userKey();
-    const r = await fetch(API+"/models" + (k ? "?key=" + encodeURIComponent(k) : ""));
+    const r = await fetch(API+"/models", {headers:{"Authorization":"Bearer "+k}});
     const list = await r.json();
-    const sel = $("model");
-    sel.innerHTML = "";
     (Array.isArray(list) ? list : []).forEach(m=>{
       const name = typeof m === "string" ? m : (m.name || m.id);
       if(!name) return;
-      if(!k && !["flux"].includes(name)) return;
       const o = document.createElement("option");
       o.value = name; o.textContent = name;
       sel.appendChild(o);
     });
-  }catch(e){ /* fallback: оставляем flux */ }
-  if(!$("model").children.length){ const o=document.createElement("option"); o.value="flux"; o.textContent="flux"; $("model").appendChild(o); }
+  }catch(e){ /* fallback: flux */ }
+  if(!sel.children.length){ const o=document.createElement("option"); o.value="flux"; o.textContent="flux"; sel.appendChild(o); }
 }
 
 function history(){ try{ return JSON.parse(localStorage.getItem(KEY)) || []; }catch(e){ return []; } }
@@ -169,7 +176,10 @@ function generate(){
   const model = $("model").value;
   const [w,h] = $("size").value.split("x");
   const seed = $("seed").value.trim() || Math.floor(Math.random()*1e9);
-  const url = `${API}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}${userKey() ? "&key=" + encodeURIComponent(userKey()) : ""}`;
+  const k = userKey();
+  const url = k
+    ? `${API}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}&key=${encodeURIComponent(k)}`
+    : `${FREE}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&seed=${encodeURIComponent(seed)}&nologo=true`;
   currentUrl = url;
   $("go").disabled = true;
   $("result").style.display = "none";
