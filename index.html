@@ -85,6 +85,7 @@
 <script>
 const API = "https://gen.pollinations.ai/image";
 const FREE = "https://image.pollinations.ai/prompt";
+const REF = "teapot-art";
 const $ = id => document.getElementById(id);
 // ---- i18n ----
 const I18N = {
@@ -98,6 +99,7 @@ const I18N = {
     history: "History", clear: "Clear", empty: "Nothing here yet — generate your first image.",
     needPrompt: "Describe what to draw 🙂", drawing: '<span class="spin"></span>Drawing… (this can take up to a minute)',
     failed: "Didn't work. Try again or simplify the description.",
+    retrying: '<span class="spin"></span>Free tier is busy — retrying…',
   },
   ru: {
     sub: 'Простой генератор картинок: опиши словами — получишь изображение. Работает на бесплатном открытом API <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations.ai</a>',
@@ -109,6 +111,7 @@ const I18N = {
     history: "История", clear: "Очистить", empty: "Пока пусто — сгенерируй первую картинку.",
     needPrompt: "Опиши, что нарисовать 🙂", drawing: '<span class="spin"></span>Рисую… (это может занять до минуты)',
     failed: "Не получилось. Попробуй ещё раз или упрости описание.",
+    retrying: '<span class="spin"></span>Бесплатный тариф занят — повторяю…',
   },
 };
 let LANG = localStorage.getItem("teapot-lang") || "en";
@@ -177,29 +180,41 @@ function generate(){
   const [w,h] = $("size").value.split("x");
   const seed = $("seed").value.trim() || Math.floor(Math.random()*1e9);
   const k = userKey();
-  const url = k
-    ? `${API}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}&key=${encodeURIComponent(k)}`
-    : `${FREE}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&seed=${encodeURIComponent(seed)}&nologo=true`;
-  currentUrl = url;
+  const base = k
+    ? `${API}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}&referrer=${REF}&key=${encodeURIComponent(k)}`
+    : `${FREE}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&seed=${encodeURIComponent(seed)}&nologo=true&referrer=${REF}`;
+  currentUrl = base;
   $("go").disabled = true;
   $("result").style.display = "none";
   setStatus(I18N[LANG].drawing);
-  const img = new Image();
-  img.onload = ()=>{
-    $("img").src = url;
-    $("result").style.display = "block";
-    $("open").href = url;
-    setStatus("");
-    $("go").disabled = false;
-    const list = history();
-    list.unshift({url, prompt, ts: Date.now()});
-    saveHistory(list); renderHistory();
+  const delays = [0, 4000, 9000, 16000];
+  let attempt = 0;
+  const tryLoad = ()=>{
+    const url = base + (attempt ? `&_r=${attempt}` : "");
+    const img = new Image();
+    img.onload = ()=>{
+      $("img").src = url;
+      $("result").style.display = "block";
+      $("open").href = url;
+      setStatus("");
+      $("go").disabled = false;
+      const list = history();
+      list.unshift({url, prompt, ts: Date.now()});
+      saveHistory(list); renderHistory();
+    };
+    img.onerror = ()=>{
+      attempt++;
+      if(attempt < delays.length){
+        setStatus(I18N[LANG].retrying);
+        setTimeout(tryLoad, delays[attempt]);
+      } else {
+        setStatus(I18N[LANG].failed + (userKey() ? "" : " " + I18N[LANG].keyHint), true);
+        $("go").disabled = false;
+      }
+    };
+    img.src = url;
   };
-  img.onerror = ()=>{
-    setStatus(I18N[LANG].failed + (userKey() ? "" : " " + I18N[LANG].keyHint), true);
-    $("go").disabled = false;
-  };
-  img.src = url;
+  tryLoad();
 }
 function setStatus(text, isErr){
   $("status").innerHTML = text;
