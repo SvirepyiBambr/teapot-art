@@ -62,6 +62,7 @@
         </select>
       </div>
       <div class="field" style="max-width:140px"><label data-i18n="seed">Seed</label><input type="number" id="seed" data-i18n-ph="randomPh" placeholder="random"></div>
+      <div class="field"><label data-i18n="key">Key (optional)</label><input id="key" type="password" data-i18n-ph="keyPh" placeholder="your Pollinations key"></div>
       <button class="btn" id="go" data-i18n="go">Draw</button>
     </div>
     <div class="status" id="status"></div>
@@ -78,11 +79,11 @@
   <div class="gal" id="gal"></div>
   <p class="empty" id="empty" data-i18n="empty">Nothing here yet — generate your first image.</p>
 
-  <footer>Powered by <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations</a> — a free, open image-generation API. No signup, no keys.</footer>
+  <footer>Powered by <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations</a> — an open image-generation API. Works without a key (rate-limited); add your own key for more models and higher limits.</footer>
 </div>
 
 <script>
-const API = "https://image.pollinations.ai";
+const API = "https://gen.pollinations.ai/image";
 const $ = id => document.getElementById(id);
 // ---- i18n ----
 const I18N = {
@@ -91,6 +92,7 @@ const I18N = {
     model: "Model", size: "Size", seed: "Seed",
     sq: "Square 1024×1024", wide: "Wide 1280×768", tall: "Portrait 768×1280",
     randomPh: "random", promptPh: 'Describe what to draw: “a ginger cat astronaut in watercolor style”…',
+    key: "Key (optional)", keyPh: "your Pollinations key", keyHint: "Some models need a free key — get one at enter.pollinations.ai.",
     go: "Draw", again: "↻ Another take", open: "Open in new tab ↗",
     history: "History", clear: "Clear", empty: "Nothing here yet — generate your first image.",
     needPrompt: "Describe what to draw 🙂", drawing: '<span class="spin"></span>Drawing… (this can take up to a minute)',
@@ -101,6 +103,7 @@ const I18N = {
     model: "Модель", size: "Размер", seed: "Зерно (Seed)",
     sq: "Квадрат 1024×1024", wide: "Широкий 1280×768", tall: "Вертикальный 768×1280",
     randomPh: "случайный", promptPh: 'Опиши, что нарисовать: «рыжий кот-космонавт в акварельном стиле»…',
+    key: "Ключ (необязательно)", keyPh: "вставь свой ключ Pollinations", keyHint: "Часть моделей требует бесплатный ключ с enter.pollinations.ai.",
     go: "Нарисовать", again: "↻ Ещё вариант", open: "Открыть в новой вкладке ↗",
     history: "История", clear: "Очистить", empty: "Пока пусто — сгенерируй первую картинку.",
     needPrompt: "Опиши, что нарисовать 🙂", drawing: '<span class="spin"></span>Рисую… (это может занять до минуты)',
@@ -122,16 +125,20 @@ $("lang-ru").addEventListener("click", ()=>{ LANG="ru"; localStorage.setItem("te
 
 
 const KEY = "teapot-art-history";
+const KEYSTORE = "teapot-art-key";
+function userKey(){ return (("key" in $ ? $("key").value : "") || localStorage.getItem(KEYSTORE) || "").trim(); }
 
 async function loadModels(){
   try{
-    const r = await fetch(API+"/models");
+    const k = userKey();
+    const r = await fetch(API+"/models" + (k ? "?key=" + encodeURIComponent(k) : ""));
     const list = await r.json();
     const sel = $("model");
     sel.innerHTML = "";
     (Array.isArray(list) ? list : []).forEach(m=>{
       const name = typeof m === "string" ? m : (m.name || m.id);
       if(!name) return;
+      if(!k && !["flux"].includes(name)) return;
       const o = document.createElement("option");
       o.value = name; o.textContent = name;
       sel.appendChild(o);
@@ -162,7 +169,7 @@ function generate(){
   const model = $("model").value;
   const [w,h] = $("size").value.split("x");
   const seed = $("seed").value.trim() || Math.floor(Math.random()*1e9);
-  const url = `${API}/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}`;
+  const url = `${API}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}${userKey() ? "&key=" + encodeURIComponent(userKey()) : ""}`;
   currentUrl = url;
   $("go").disabled = true;
   $("result").style.display = "none";
@@ -179,7 +186,7 @@ function generate(){
     saveHistory(list); renderHistory();
   };
   img.onerror = ()=>{
-    setStatus(I18N[LANG].failed, true);
+    setStatus(I18N[LANG].failed + (userKey() ? "" : " " + I18N[LANG].keyHint), true);
     $("go").disabled = false;
   };
   img.src = url;
@@ -195,6 +202,7 @@ $("again").addEventListener("click", ()=>{
   generate();
 });
 $("clear").addEventListener("click", ()=>{ saveHistory([]); renderHistory(); });
+if($("key")){ $("key").value = localStorage.getItem(KEYSTORE) || ""; $("key").addEventListener("input", ()=> localStorage.setItem(KEYSTORE, $("key").value.trim())); }
 loadModels(); renderHistory(); applyLang();
 </script>
 </body>
