@@ -79,7 +79,7 @@
   <div class="gal" id="gal"></div>
   <p class="empty" id="empty" data-i18n="empty">Nothing here yet — generate your first image.</p>
 
-  <footer>Powered by <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations</a> — an open image-generation API. Works without a key (rate-limited); add your own key for more models and higher limits.</footer>
+  <footer data-i18n="foot">Powered by <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations</a> — anonymous tier: 1 image / 15 s, basic model. Add your own key for more models and no wait.</footer>
 </div>
 
 <script>
@@ -94,24 +94,28 @@ const I18N = {
     model: "Model", size: "Size", seed: "Seed",
     sq: "Square 1024×1024", wide: "Wide 1280×768", tall: "Portrait 768×1280",
     randomPh: "random", promptPh: 'Describe what to draw: “a ginger cat astronaut in watercolor style”…',
-    key: "Key (optional)", keyPh: "your Pollinations key", keyHint: "Tip: without a key you get the free tier; add a free key from enter.pollinations.ai for more models and higher limits.",
+    key: "Key (optional)", keyPh: "your Pollinations key", keyHint: "Anonymous tier: 1 image / 15 s, basic model. Your own key unlocks more models and removes the wait.",
     go: "Draw", again: "↻ Another take", open: "Open in new tab ↗",
     history: "History", clear: "Clear", empty: "Nothing here yet — generate your first image.",
     needPrompt: "Describe what to draw 🙂", drawing: '<span class="spin"></span>Drawing… (this can take up to a minute)',
-    failed: "Didn't work. Try again or simplify the description.",
-    retrying: '<span class="spin"></span>Free tier is busy — retrying…',
+    failed: "Didn't work. The anonymous tier allows 1 image per 15 seconds — wait a moment and try again.",
+    retrying: '<span class="spin"></span>Free tier busy — retrying…',
+    wait: '<span class="spin"></span>Free tier: next image in {s}s…',
+    foot: 'Powered by <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations</a> — anonymous tier: 1 image / 15 s, basic model. Add your own key for more models and no wait.',
   },
   ru: {
     sub: 'Простой генератор картинок: опиши словами — получишь изображение. Работает на бесплатном открытом API <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations.ai</a>',
     model: "Модель", size: "Размер", seed: "Зерно (Seed)",
     sq: "Квадрат 1024×1024", wide: "Широкий 1280×768", tall: "Вертикальный 768×1280",
     randomPh: "случайный", promptPh: 'Опиши, что нарисовать: «рыжий кот-космонавт в акварельном стиле»…',
-    key: "Ключ (необязательно)", keyPh: "вставь свой ключ Pollinations", keyHint: "Совет: без ключа доступен бесплатный тариф; добавь бесплатный ключ с enter.pollinations.ai — больше моделей и выше лимиты.",
+    key: "Ключ (необязательно)", keyPh: "вставь свой ключ Pollinations", keyHint: "Анонимный тариф: 1 картинка в 15 секунд, базовая модель. Свой ключ открывает больше моделей и снимает ожидание.",
     go: "Нарисовать", again: "↻ Ещё вариант", open: "Открыть в новой вкладке ↗",
     history: "История", clear: "Очистить", empty: "Пока пусто — сгенерируй первую картинку.",
     needPrompt: "Опиши, что нарисовать 🙂", drawing: '<span class="spin"></span>Рисую… (это может занять до минуты)',
-    failed: "Не получилось. Попробуй ещё раз или упрости описание.",
+    failed: "Не получилось. Анонимный тариф разрешает 1 картинку в 15 секунд — подожди немного и попробуй снова.",
     retrying: '<span class="spin"></span>Бесплатный тариф занят — повторяю…',
+    wait: '<span class="spin"></span>Свободный тариф: следующая картинка через {s} с…',
+    foot: 'Работает на <a href="https://pollinations.ai" target="_blank" rel="noopener">Pollinations</a> — анонимный тариф: 1 картинка в 15 с, базовая модель. Свой ключ — больше моделей и без ожидания.',
   },
 };
 let LANG = localStorage.getItem("teapot-lang") || "en";
@@ -139,7 +143,7 @@ async function loadModels(){
   if(!k){
     // Anonymous requests are served by the free legacy endpoint (model choice is fixed).
     const o = document.createElement("option");
-    o.value = "flux"; o.textContent = "flux (free tier)";
+    o.value = "sana"; o.textContent = "sana (free tier)";
     sel.appendChild(o);
     return;
   }
@@ -172,23 +176,53 @@ function renderHistory(){
   });
 }
 
+// Anonymous tier: 1 image / 15 s, basic model only ("sana").
+// We gate client-side so users never hit a silent 402, and retry at the
+// same 15 s cadence instead of hammering the endpoint.
+const FREE_COOLDOWN = 15000;
+let gateUntil = 0, generating = false, gateTimer = null;
+
+function tickGate(){
+  const left = Math.ceil((gateUntil - Date.now()) / 1000);
+  if(left > 0){
+    $("go").disabled = true;
+    if(!generating) setStatus(I18N[LANG].wait.replace("{s}", left));
+  } else {
+    if(gateTimer){ clearInterval(gateTimer); gateTimer = null; }
+    gateUntil = 0;
+    if(!generating){ $("go").disabled = false; setStatus(""); }
+  }
+}
+function setGate(ms){
+  gateUntil = Date.now() + ms;
+  if(!gateTimer) gateTimer = setInterval(tickGate, 300);
+  tickGate();
+}
+
 let currentUrl = "";
 function generate(){
   const prompt = $("prompt").value.trim();
   if(!prompt){ setStatus(I18N[LANG].needPrompt, true); return; }
-  const model = $("model").value;
-  const [w,h] = $("size").value.split("x");
-  const seed = $("seed").value.trim() || Math.floor(Math.random()*1e9);
   const k = userKey();
-  const base = k
-    ? `${API}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}&referrer=${REF}&key=${encodeURIComponent(k)}`
-    : `${FREE}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&seed=${encodeURIComponent(seed)}&nologo=true&referrer=${REF}`;
-  currentUrl = base;
+  if(!k && gateUntil > Date.now()){ tickGate(); return; }
+  start(prompt, k);
+}
+
+function start(prompt, k){
+  generating = true;
   $("go").disabled = true;
   $("result").style.display = "none";
   setStatus(I18N[LANG].drawing);
-  const delays = [0, 4000, 9000, 16000];
+  const model = k ? $("model").value : "sana";
+  const [w,h] = $("size").value.split("x");
+  const seed = $("seed").value.trim() || Math.floor(Math.random()*1e9);
+  const base = k
+    ? `${API}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=${encodeURIComponent(model)}&seed=${encodeURIComponent(seed)}&referrer=${REF}&key=${encodeURIComponent(k)}`
+    : `${FREE}/${encodeURIComponent(prompt)}?width=${w}&height=${h}&model=sana&seed=${encodeURIComponent(seed)}&nologo=true&referrer=${REF}`;
+  currentUrl = base;
+  const delays = k ? [0, 3000, 8000] : [0, FREE_COOLDOWN, FREE_COOLDOWN, FREE_COOLDOWN];
   let attempt = 0;
+  const finish = ()=>{ generating = false; if(gateUntil <= Date.now()) $("go").disabled = false; };
   const tryLoad = ()=>{
     const url = base + (attempt ? `&_r=${attempt}` : "");
     const img = new Image();
@@ -196,20 +230,22 @@ function generate(){
       $("img").src = url;
       $("result").style.display = "block";
       $("open").href = url;
-      setStatus("");
-      $("go").disabled = false;
       const list = history();
       list.unshift({url, prompt, ts: Date.now()});
       saveHistory(list); renderHistory();
+      finish();
+      if(!k){ setGate(FREE_COOLDOWN); } else { setStatus(""); }
     };
     img.onerror = ()=>{
       attempt++;
       if(attempt < delays.length){
         setStatus(I18N[LANG].retrying);
+        if(!k) setGate(FREE_COOLDOWN);
         setTimeout(tryLoad, delays[attempt]);
       } else {
-        setStatus(I18N[LANG].failed + (userKey() ? "" : " " + I18N[LANG].keyHint), true);
-        $("go").disabled = false;
+        setStatus(I18N[LANG].failed + (k ? "" : " " + I18N[LANG].keyHint), true);
+        finish();
+        if(!k) setGate(FREE_COOLDOWN);
       }
     };
     img.src = url;
